@@ -47,8 +47,30 @@ async function capture(page, locator, target) {
   return { width: Math.round(box.width), height: Math.round(box.height) };
 }
 
-async function readPanel(page, relative, mode = "") {
+async function readPanel(page, relative, mode = "", manifest = null) {
   await page.goto(urlFor(relative), { waitUntil: "load" });
+  if (relative === "dividends.html") {
+    const sparks = page.locator("table[role='presentation'] svg.snapshot-sparkline");
+    const count = await sparks.count();
+    for (let i = 0; i < count; i++) {
+      // The locator list shrinks as SVG nodes are replaced.
+      const spark = sparks.nth(0);
+      const symbol = await spark.evaluate((node) => node.closest("tr")?.querySelector("td")?.textContent?.trim() || "");
+      if (!/^[A-Z0-9]{1,12}$/.test(symbol)) throw new Error("Invalid dividend sparkline symbol.");
+      const assetRelative = `sparklines/dividends/${symbol}.png`;
+      const size = await capture(page, spark, assetPath(assetRelative));
+      manifest?.assets.push({ kind: "dividend-sparkline", symbol, file: `assets/${assetRelative}`, ...size });
+      await spark.evaluate((node, src) => {
+        const image = document.createElement("img");
+        image.src = src;
+        image.alt = "52-week price chart";
+        image.width = 92;
+        image.height = 30;
+        image.style.cssText = "display:block;border:0;width:92px;height:30px";
+        node.replaceWith(image);
+      }, assetUrl(assetRelative));
+    }
+  }
   const panel = await page.evaluate((panelMode) => {
     const table = document.querySelector("table[role='presentation']");
     if (table && panelMode === "media") {
@@ -155,9 +177,9 @@ async function main() {
       if (!section.table) throw new Error(`No scan table found for ${scan}.`);
       sections.push({ scan, count, ...section });
     }
-    const media = await readPanel(page, "media.html", "media");
-    const raises = await readPanel(page, "raises.html", "compact");
-    const dividends = await readPanel(page, "dividends.html", "compact");
+    const media = await readPanel(page, "media.html", "media", manifest);
+    const raises = await readPanel(page, "raises.html", "compact", manifest);
+    const dividends = await readPanel(page, "dividends.html", "compact", manifest);
     const sourceManifest = SOURCE_DIR ? path.resolve(SOURCE_DIR, "..", "..", "snapshot", "latest", "manifest.json") : null;
     let snapshotTime = null;
     try {
