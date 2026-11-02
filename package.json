@@ -1,0 +1,6 @@
+{
+  "name": "marketech-newsletter",
+  "private": true,
+  "scripts": { "generate": "node scripts/generate-newsletter.js" },
+  "dependencies": { "playwright": "1.61.0" }
+}
