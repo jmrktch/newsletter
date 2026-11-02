@@ -60,11 +60,36 @@ async function main() {
         manifest.assets.push({ kind: "sparkline", scan, symbol: identity.symbol, file: `assets/${relative}`, ...size });
         await spark.evaluate((node, src) => { const img=document.createElement("img"); img.src=src; img.alt="Daily sparkline"; img.width=92; img.height=30; img.style.cssText="display:block;border:0;width:92px;height:30px"; node.replaceWith(img); }, assetUrl(relative));
       }
-      const section = await page.evaluate(() => ({
-        title: document.querySelector("h3")?.textContent?.trim() || "Market scan",
-        subtitle: document.querySelector("p")?.textContent?.trim() || "",
-        table: document.querySelector("table[role='presentation']")?.outerHTML || ""
-      }));
+      const section = await page.evaluate(() => {
+        const table = document.querySelector("table[role='presentation']");
+        if (table) {
+          // Structural table styles repeat hundreds of times. Keep a compact
+          // inline version so Outlook and dark-mode email clients still get
+          // deterministic table geometry and positive/negative colouring.
+          table.removeAttribute("bgcolor");
+          table.setAttribute("style", "width:100%;border-collapse:collapse;font-size:12px;line-height:17px;mso-table-lspace:0pt;mso-table-rspace:0pt");
+          table.querySelectorAll("th").forEach((cell) => {
+            cell.removeAttribute("class");
+            cell.removeAttribute("bgcolor");
+            cell.setAttribute("style", "padding:7px;background:#f1f5f8;color:#5d6b78;font-size:11px;line-height:17px;text-align:left;font-weight:700");
+          });
+          table.querySelectorAll("td").forEach((cell) => {
+            const sourceStyle = cell.getAttribute("style") || "";
+            const colour = (sourceStyle.match(/color:\s*(#[0-9a-f]{6})/i) || [])[1];
+            cell.removeAttribute("class");
+            cell.removeAttribute("align");
+            cell.removeAttribute("bgcolor");
+            const colourStyle = colour && colour.toLowerCase() !== "#263442" ? `;color:${colour}` : "";
+            cell.setAttribute("valign", "middle");
+            cell.setAttribute("style", `padding:8px 7px;border-bottom:1px solid #edf1f5${colourStyle}`);
+          });
+        }
+        return {
+          title: document.querySelector("h3")?.textContent?.trim() || "Market scan",
+          subtitle: document.querySelector("p")?.textContent?.trim() || "",
+          table: table?.outerHTML || ""
+        };
+      });
       if (!section.table) throw new Error(`No scan table found for ${scan}.`);
       sections.push({ scan, count, ...section });
     }
