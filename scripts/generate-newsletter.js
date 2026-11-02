@@ -24,11 +24,26 @@ function formatSnapshotTime(iso) {
   return new Intl.DateTimeFormat("en-AU", { timeZone:"Australia/Sydney", weekday:"long", day:"numeric", month:"short", year:"numeric", hour:"numeric", minute:"2-digit", hour12:true, timeZoneName:"short" }).format(new Date(iso));
 }
 
-async function capture(locator, target) {
+async function capture(page, locator, target) {
   fs.mkdirSync(path.dirname(target), { recursive: true });
+  // `omitBackground` alone cannot overcome the source pages' white body.
+  // Make only the document canvas transparent: coloured heatmap tiles and
+  // sparkline strokes remain intact, while their surrounding PNG pixels do
+  // not become a fixed white rectangle in a dark-mode email client.
+  await locator.evaluate(() => {
+    let style = document.getElementById("newsletter-transparent-capture-canvas");
+    if (!style) {
+      style = document.createElement("style");
+      style.id = "newsletter-transparent-capture-canvas";
+      style.textContent = "html,body,*[bgcolor='#ffffff'],*[style*='background:#ffffff'],*[style*='background:#fff']{background:transparent!important}";
+      document.head.appendChild(style);
+    }
+  });
   const box = await locator.boundingBox();
   if (!box) throw new Error(`Missing capture target: ${target}`);
-  await locator.screenshot({ path: target, type: "png", omitBackground: true, animations: "disabled" });
+  // Page screenshots honour omitBackground consistently; locator screenshots
+  // can flatten the page canvas before the option is applied.
+  await page.screenshot({ path: target, type: "png", omitBackground: true, animations: "disabled", clip: box });
   return { width: Math.round(box.width), height: Math.round(box.height) };
 }
 
@@ -42,7 +57,7 @@ async function main() {
     await page.goto(urlFor("heatmap.html"), { waitUntil: "load" });
     const heatmap = page.locator(".snapshot-heatmap-tiles");
     if (await heatmap.count() !== 1) throw new Error("Published heatmap does not expose exactly one heatmap target.");
-    const heatmapFile = assetPath("heatmap.png"), heatmapSize = await capture(heatmap, heatmapFile);
+    const heatmapFile = assetPath("heatmap.png"), heatmapSize = await capture(page, heatmap, heatmapFile);
     manifest.assets.push({ kind: "heatmap", file: "assets/heatmap.png", ...heatmapSize });
     const sections = [];
     for (const scan of SCANS) {
@@ -56,7 +71,7 @@ async function main() {
         const identity = await spark.evaluate((node) => ({ scan: node.dataset.scan, symbol: node.dataset.symbol }));
         if (identity.scan !== scan || !/^[A-Z0-9]{1,12}$/.test(identity.symbol || "")) throw new Error(`Invalid sparkline identity in ${scan}.`);
         const relative = `sparklines/${scan}/${identity.symbol}.png`;
-        const size = await capture(spark, assetPath(relative));
+        const size = await capture(page, spark, assetPath(relative));
         manifest.assets.push({ kind: "sparkline", scan, symbol: identity.symbol, file: `assets/${relative}`, ...size });
         await spark.evaluate((node, src) => { const img=document.createElement("img"); img.src=src; img.alt="Daily sparkline"; img.width=92; img.height=30; img.style.cssText="display:block;border:0;width:92px;height:30px"; node.replaceWith(img); }, assetUrl(relative));
       }
