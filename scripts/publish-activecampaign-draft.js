@@ -11,7 +11,7 @@ const EMAIL_FILE = path.join(ROOT, "site", "newsletter", "latest", "index.html")
 const LIST_ID = 42; // The Daily Focus List
 const ADDRESS_ID = 2;
 const SUBJECT = "The Daily Focus";
-const TEST_RECIPIENT = "jwilson@marketech.com.au";
+const TEST_RECIPIENTS = ["jwilson@marketech.com.au", "tjwilson.w@gmail.com"];
 const SENDER = {
   fromname: "Marketech Support",
   fromemail: "support@marketech.com.au",
@@ -51,7 +51,7 @@ async function main() {
   const campaignName = `Daily Market Update_TDF ${todayInSydney()}`;
 
   if (dryRun) {
-    console.log(JSON.stringify({ ok: true, dryRun: true, campaignName, listId: LIST_ID, addressId: ADDRESS_ID, testRecipient: TEST_RECIPIENT, htmlBytes: Buffer.byteLength(html), note: "No ActiveCampaign request was made." }, null, 2));
+    console.log(JSON.stringify({ ok: true, dryRun: true, campaignName, listId: LIST_ID, addressId: ADDRESS_ID, testRecipients: TEST_RECIPIENTS, htmlBytes: Buffer.byteLength(html), note: "No ActiveCampaign request was made." }, null, 2));
     return;
   }
   if (!baseUrl || !token) fail("ACTIVE_CAMPAIGN_URL and ACTIVE_CAMPAIGN_API_TOKEN must be configured.");
@@ -86,13 +86,16 @@ async function main() {
     created = true;
   }
 
-  const test = await api(baseUrl, token, "campaigns/test-send", {
-    method: "POST",
-    body: JSON.stringify({ campaignId: Number(campaign.id), messageId: Number(message.id), subject: SUBJECT, toEmail: TEST_RECIPIENT }),
-  });
+  const tests = [];
+  for (const toEmail of TEST_RECIPIENTS) {
+    tests.push({ toEmail, result: await api(baseUrl, token, "campaigns/test-send", {
+      method: "POST",
+      body: JSON.stringify({ campaignId: Number(campaign.id), messageId: Number(message.id), subject: SUBJECT, toEmail }),
+    }) });
+  }
   console.log(JSON.stringify({
     ok: true, created, campaign: { id: campaign.id, name: campaignName, status: "draft", listId: LIST_ID, addressId: ADDRESS_ID },
-    message: { id: message.id, subject: SUBJECT, htmlBytes: Buffer.byteLength(html) }, testRecipient: TEST_RECIPIENT, test,
+    message: { id: message.id, subject: SUBJECT, htmlBytes: Buffer.byteLength(html) }, tests,
     note: "This script never enables, schedules, or sends a campaign to subscribers.",
   }, null, 2));
 }
