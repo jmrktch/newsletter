@@ -10,6 +10,7 @@ const PUBLIC_BASE = (process.env.NEWSLETTER_PUBLIC_BASE || "https://jmrktch.gith
 const HEADER_IMAGE = "https://marketech23137.activehosted.com/content/4PzAd/2026/09/08/6ddfa2d5-a304-4e1a-8710-d2f83f5fe0c4.png";
 const FOCUS = "https://focus.marketech.com.au/#/";
 const FOCUS_EDGE_IMAGE = "https://marketech23137.activehosted.com/content/4PzAd/2026/11/03/c3a31d6f-39fb-4c4b-93f3-e849e86d31e8.png";
+const ARTICLE_ICON = "https://marketech23137.activehosted.com/content/4PzAd/2026/09/09/22b8ea10-7e0b-4e37-be62-fc32032ef92d.png";
 const SCANS = ["top-gainers", "top-losers", "gapped-up", "gapped-down", "trading-halt", "52-week-high", "52-week-low", "rsi-oversold", "rsi-overbought"];
 const esc = (v) => String(v ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 const urlFor = (relative) => SOURCE_DIR ? pathToFileURL(path.join(SOURCE_DIR, relative)).toString() : `${SOURCE_URL}/${relative}`;
@@ -97,17 +98,21 @@ async function readPanel(page, relative, mode = "", manifest = null) {
       }, assetUrl(assetRelative));
     }
   }
-  const panel = await page.evaluate((panelMode) => {
+  const panel = await page.evaluate(({ panelMode, articleIcon }) => {
     const table = document.querySelector("table[role='presentation']");
     if (table && panelMode === "media") {
       const safe = (value) => String(value || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
       const rows = [...table.querySelectorAll("tbody > tr")].map((row) => {
         const logo = row.querySelector("img:not([src^='data:'])");
-        const typeIcon = row.querySelector("img[src^='data:']");
         const divs = row.querySelectorAll("div");
-        return { src: logo?.getAttribute("src") || "", alt: logo?.getAttribute("alt") || "", typeIcon: typeIcon?.getAttribute("src") || "", meta: divs[0]?.textContent?.trim() || "", headline: divs[1]?.textContent?.trim() || "" };
+        const metaParts = divs[0]?.querySelectorAll("span") || [];
+        return {
+          src: logo?.getAttribute("src") || "", alt: logo?.getAttribute("alt") || "",
+          provider: metaParts[0]?.textContent?.trim() || "", date: metaParts[1]?.textContent?.trim() || "",
+          headline: divs[1]?.textContent?.trim() || ""
+        };
       }).filter((row) => row.headline);
-      const compactRows = rows.map((row) => `<tr><td width="78" align="center" valign="middle" style="padding:10px 0;border-bottom:1px solid #edf1f5;width:78px;text-align:center">${row.src ? `<img src="${safe(row.src)}" alt="${safe(row.alt)}" width="42" style="display:block;border:0;width:42px;height:auto;margin:0 auto">` : ""}</td><td valign="middle" style="padding:10px 0 10px 10px;border-bottom:1px solid #edf1f5;color:#263442;font-size:12px;line-height:17px"><div style="margin-bottom:4px;color:#697784;font-size:11px;line-height:15px;font-weight:700">${row.typeIcon ? `<img src="${safe(row.typeIcon)}" alt="Article" width="13" height="13" style="display:inline-block;border:0;width:13px;height:13px;margin-right:5px;vertical-align:-2px">` : ""}${safe(row.meta)}</div><div style="color:#1e2a36;font-size:13px;line-height:18px">${safe(row.headline)}</div></td></tr>`).join("");
+      const compactRows = rows.map((row) => `<tr><td class="media-logo-cell" width="78" align="center" valign="middle" style="padding:10px 0;border-bottom:1px solid #edf1f5;color:#263442;vertical-align:middle;font-size:12px;line-height:17px;width:78px;text-align:center" bgcolor="#ffffff">${row.src ? `<img class="media-provider-logo" src="${safe(row.src)}" alt="${safe(row.alt)}" width="42" style="display:block;border:0;width:42px;height:auto;margin:0 auto">` : ""}</td><td class="media-story-cell" valign="middle" style="padding:10px 0;border-bottom:1px solid #edf1f5;color:#263442;vertical-align:middle;font-size:12px;line-height:17px;padding-left:10px" bgcolor="#ffffff"><div class="media-meta" style="margin-bottom:4px;color:#697784;font-size:11px;line-height:15px;font-weight:700"><img class="media-type-icon" src="${articleIcon}" alt="Article" width="13" height="13" style="display:inline-block;width:13px;height:13px;margin-right:5px;vertical-align:-2px;border:0"><span class="media-provider-name" style="display:inline-block;margin-right:6px;color:#174889">${safe(row.provider)}</span><span>${safe(row.date)}</span></div><div class="media-headline" style="color:#1e2a36;font-size:13px;line-height:18px;font-weight:400">${safe(row.headline)}</div></td></tr>`).join("");
       return { title: document.querySelector("h3")?.textContent?.trim() || "Market update", subtitle: "", table: `<table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt"><tbody>${compactRows}</tbody></table>` };
     }
     if (table && panelMode === "compact") {
@@ -137,7 +142,7 @@ async function readPanel(page, relative, mode = "", manifest = null) {
       // source page's disclaimer/footer and deliberately is not included.
       table: table?.outerHTML || ""
     };
-  }, mode);
+  }, { panelMode: mode, articleIcon: ARTICLE_ICON });
   if (!panel.table) throw new Error(`No content table found for ${relative}.`);
   return panel;
 }
