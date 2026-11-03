@@ -20,8 +20,8 @@ function button(label, href, width = 210) {
 }
 
 function usualEmailFooter() {
-  const appStore = "https://ac.marketech.com.au/lt.php?x=4DZy~GE3UFHK55B7yd~NhhRt2H_RjdEiles0XnjGV6agDXN9zEy7wODiCqtkygAhxTYw08QGWqUK5w4_MN34iV5w2XzzjdT3nuVAYnTJJk";
-  const playStore = "https://ac.marketech.com.au/lt.php?x=4DZy~GE3UFHK55B7yd~NhhRt2H_RjdEiles0XnjGV6agDXN9zEy7wODiCqtkygAhxTYw08QGWqUK5w4_MN34iV5w2XzzjdT3nuVAYnTJJ0";
+  const appStore = "https://apps.apple.com/au/app/marketech-focus/id1351088292";
+  const playStore = "https://play.google.com/store/apps/details?id=com.marketech.app&hl=en_AU";
   return `<tr><td class="pad" style="padding:0 28px 6px;background:#ffffff" bgcolor="#ffffff"><table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0"><tr><td height="1" bgcolor="#0b3861" style="height:1px;line-height:1px;background:#0b3861;font-size:0">&nbsp;</td></tr></table></td></tr>
 <tr><td style="padding:40px 50px 15px;background:#f2f2f2;text-align:center;color:#555555;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:17px" bgcolor="#f2f2f2">Download the Marketech Focus app:</td></tr>
 <tr><td style="padding:5px 50px 20px;background:#f2f2f2" bgcolor="#f2f2f2"><table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0"><tr><td width="50%" align="right" style="padding-right:10px"><a href="${appStore}" target="_blank" rel="noopener noreferrer"><img src="https://marketech23137.img-us10.com/public//4fe0acf2a9d5150806fce656dbac3daa.png?r=1188656793" alt="App Store" width="120" style="display:block;border:0;width:120px;height:auto"></a></td><td width="50%" align="left" style="padding-left:10px"><a href="${playStore}" target="_blank" rel="noopener noreferrer"><img src="https://marketech23137.img-us10.com/public//4f9ce0ff0e0d5b91fd7838438dd40138.png?r=1982256529" alt="Play Store" width="115" style="display:block;border:0;width:115px;height:auto"></a></td></tr></table></td></tr>
@@ -34,7 +34,7 @@ function reorderedUsualEmailFooter() {
   const dividerEnd = footer.indexOf("\n") + 1;
   const brandStart = footer.lastIndexOf('<tr><td style="padding:20px 28px;background:#ffffff"');
   if (dividerEnd < 1 || brandStart < dividerEnd) throw new Error("Standard email footer structure is invalid.");
-  const brandRow = footer.slice(brandStart).replace('padding:20px 28px;background:#ffffff', 'padding:10px 28px 20px;background:#ffffff');
+  const brandRow = footer.slice(brandStart).replace('padding:20px 28px;background:#ffffff', 'padding:10px 20px;background:#ffffff');
   // Logo/socials first; omit the now-unneeded navy divider.
   return `${brandRow}${footer.slice(dividerEnd, brandStart)}`;
 }
