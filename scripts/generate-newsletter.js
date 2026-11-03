@@ -29,6 +29,16 @@ function usualEmailFooter() {
 <tr><td style="padding:20px 28px;background:#ffffff" bgcolor="#ffffff"><table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0"><tr><td width="50%" align="left" valign="middle"><a href="https://marketech.com.au" target="_blank" rel="noopener noreferrer"><img src="https://marketech23137.activehosted.com/cdn-cgi/image/fit=scale-down,width=650,dpr=2,format=auto,onerror=redirect/content/4PzAd/2026/05/14/7c80cc9d-ddff-463f-ba98-b8665e93829c.png?r=1360625741" alt="Marketech" width="200" style="display:block;border:0;width:200px;max-width:100%;height:auto"></a></td><td width="50%" align="right" valign="middle"><a href="https://x.com/marketechau" target="_blank" rel="noopener noreferrer"><img src="https://ac-marketech-com-au.img-us3.com/_social_/flat-dark-round-x.png" alt="X" width="30" style="display:inline-block;border:0;width:30px"></a>&nbsp;&nbsp;<a href="https://www.linkedin.com/company/marketech-au" target="_blank" rel="noopener noreferrer"><img src="https://ac-marketech-com-au.img-us3.com/_social_/flat-dark-round-linkedin.png" alt="LinkedIn" width="30" style="display:inline-block;border:0;width:30px"></a>&nbsp;&nbsp;<a href="https://marketech.com.au" target="_blank" rel="noopener noreferrer"><img src="https://ac-marketech-com-au.img-us3.com/_social_/flat-dark-round-website.png" alt="Website" width="30" style="display:inline-block;border:0;width:30px"></a>&nbsp;&nbsp;<a href="mailto:support@marketech.com.au"><img src="https://ac-marketech-com-au.img-us3.com/_social_/flat-dark-round-email.png" alt="Email" width="30" style="display:inline-block;border:0;width:30px"></a></td></tr></table></td></tr>`;
 }
 
+function reorderedUsualEmailFooter() {
+  const footer = usualEmailFooter();
+  const dividerEnd = footer.indexOf("\n") + 1;
+  const brandStart = footer.lastIndexOf('<tr><td style="padding:20px 28px;background:#ffffff"');
+  if (dividerEnd < 1 || brandStart < dividerEnd) throw new Error("Standard email footer structure is invalid.");
+  const brandRow = footer.slice(brandStart).replace('padding:20px 28px;background:#ffffff', 'padding:10px 28px 20px;background:#ffffff');
+  // Logo/socials first; omit the now-unneeded navy divider.
+  return `${brandRow}${footer.slice(dividerEnd, brandStart)}`;
+}
+
 function formatSnapshotTime(iso) {
   if (!iso) return "Latest published snapshot";
   return new Intl.DateTimeFormat("en-AU", { timeZone:"Australia/Sydney", weekday:"long", day:"numeric", month:"short", year:"numeric", hour:"numeric", minute:"2-digit", hour12:true, timeZoneName:"short" }).format(new Date(iso));
@@ -228,7 +238,7 @@ async function main() {
     finalHtml = finalHtml.replaceAll('href="https://focus.marketech.com.au/#/"', 'href="https://focus.marketech.com.au/#/?uf_action=scan"');
     const disclaimerMarker = '<tr><td class="pad" style="padding:18px 26px;color:#7d8893;font-size:11px;line-height:17px;text-align:center;background:#ffffff">';
     if (!finalHtml.includes(disclaimerMarker)) throw new Error("Newsletter disclaimer marker is missing.");
-    finalHtml = finalHtml.replace(disclaimerMarker, `${usualEmailFooter()}${disclaimerMarker}`);
+    finalHtml = finalHtml.replace(disclaimerMarker, `${reorderedUsualEmailFooter()}${disclaimerMarker}`);
     const emailBytes = Buffer.byteLength(finalHtml, "utf8");
     if (emailBytes > 100000) throw new Error(`Email HTML is ${emailBytes.toLocaleString()} bytes; it must remain below 100 KB.`);
     fs.writeFileSync(path.join(OUTPUT, "index.html"), finalHtml);
