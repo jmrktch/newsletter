@@ -31,7 +31,7 @@ function usualEmailFooter() {
 }
 
 function focusEdgeEducationPanel() {
-  const cta = button("Get FocusEdge", FOCUS, 150).replaceAll("FocusEdge", "Focus<em>Edge</em>");
+  const cta = button("Get FocusEdge", "https://focus.marketech.com.au/#/upgrade", 150).replaceAll("FocusEdge", "Focus<em>Edge</em>");
   return `<tr><td class="pad" style="padding:15px 28px 19px;background:#ffffff" bgcolor="#ffffff"><table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;border:3px solid #08182F;border-radius:9px;border-collapse:separate;overflow:hidden;background:#f6f7f8" bgcolor="#f6f7f8"><tr><td style="padding:16px 16px 12px;background:#f6f7f8" bgcolor="#f6f7f8"><h3 style="margin:0 0 7px;color:#111b24;font-size:14px;line-height:20px;font-weight:700;text-align:center">Stream live ASX market data in Excel. Included with Focus<em>Edge</em>.</h3><p style="margin:0;color:#263442;font-size:14px;line-height:19px;text-align:center">Install it from inside Excel, log in, and it’s live. It works in Excel on Windows, Mac and the web.</p>${cta}</td></tr><tr><td style="padding:0;background:#f6f7f8;line-height:0;font-size:0" bgcolor="#f6f7f8"><img src="${FOCUS_EDGE_IMAGE}" alt="FocusEdge live ASX data in Excel" width="704" height="150" style="display:block;border:0;width:100%;height:150px"></td></tr></table></td></tr>`;
 }
 
