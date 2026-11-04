@@ -24,6 +24,14 @@ function sydneyDate(value) {
   return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
+function sydneyAssetKey(value) {
+  const date = new Date(value);
+  const parts = new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })
+    .formatToParts(date);
+  const part = (name) => parts.find((item) => item.type === name)?.value;
+  return `${part("year")}-${part("month")}-${part("day")}-${part("hour")}${part("minute")}${part("second")}${String(date.getMilliseconds()).padStart(3, "0")}`;
+}
+
 async function snapshotGeneratedAt() {
   const sourceManifest = SOURCE_DIR ? path.resolve(SOURCE_DIR, "..", "..", "snapshot", "latest", "manifest.json") : null;
   try {
@@ -37,7 +45,7 @@ async function snapshotGeneratedAt() {
 function normaliseArchives(manifest) {
   const archive = manifest?.archives || {};
   const heatmaps = Array.isArray(archive.heatmaps) ? archive.heatmaps
-    .filter((item) => /^assets\/heatmaps\/\d{4}-\d{2}-\d{2}\.png$/.test(item?.file || "")) : [];
+    .filter((item) => /^assets\/heatmaps\/\d{4}-\d{2}-\d{2}(?:-\d{9})?\.png$/.test(item?.file || "")) : [];
   const sparklineBuckets = Object.fromEntries(Object.entries(archive.sparklineBuckets || {})
     .filter(([slot, files]) => /^[0-6]$/.test(slot) && Array.isArray(files))
     .map(([slot, files]) => [slot, files.filter((file) => /^assets\/sparklines\/buckets\/[0-6]\/.+\.png$/.test(file))]));
@@ -204,8 +212,10 @@ async function readPanel(page, relative, mode = "", manifest = null) {
 }
 
 async function main() {
+  const runStartedAt = new Date();
   const snapshotTime = await snapshotGeneratedAt();
-  const archiveDate = sydneyDate(new Date());
+  const archiveDate = sydneyDate(runStartedAt);
+  const archiveKey = sydneyAssetKey(runStartedAt);
   fs.rmSync(OUTPUT, { recursive: true, force: true });
   const archives = await restoreArchives();
   const bucket = archives.nextBucket;
@@ -226,7 +236,7 @@ async function main() {
       const lines = box ? [...box.querySelectorAll(":scope > div")] : [];
       return { label: lines[0]?.textContent?.trim() || "", values: lines[1]?.textContent?.trim() || "", color: lines[1] ? getComputedStyle(lines[1]).color : "" };
     });
-    const heatmapRelative = `heatmaps/${archiveDate}.png`;
+    const heatmapRelative = `heatmaps/${archiveKey}.png`;
     const heatmapFile = assetPath(heatmapRelative), heatmapSize = await capture(page, heatmap, heatmapFile);
     // Preserve the former latest URL for existing emails; new emails use the
     // dated image above and therefore never have their heatmap replaced.
@@ -321,9 +331,9 @@ async function main() {
     const emailBytes = Buffer.byteLength(finalHtml, "utf8");
     if (emailBytes > 100000) throw new Error(`Email HTML is ${emailBytes.toLocaleString()} bytes; it must remain below 100 KB.`);
     const heatmapArchive = [
-      ...archives.heatmaps.filter((item) => item.date !== archiveDate),
-      { date: archiveDate, file: `assets/${heatmapRelative}` }
-    ].sort((a, b) => a.date.localeCompare(b.date));
+      ...archives.heatmaps,
+      { id: archiveKey, date: archiveDate, file: `assets/${heatmapRelative}` }
+    ].sort((a, b) => a.file.localeCompare(b.file));
     const bucketAssets = manifest.assets
       .filter((asset) => asset.kind === "sparkline" || asset.kind === "dividend-sparkline")
       .map((asset) => asset.file);
