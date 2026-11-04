@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "generate": "node scripts/generate-newsletter.js",
+    "verify:published": "node scripts/verify-published-newsletter.js",
     "activecampaign:publish-draft": "node scripts/publish-activecampaign-draft.js"
   },
   "dependencies": { "playwright": "1.61.0" }

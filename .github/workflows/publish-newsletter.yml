@@ -33,6 +33,8 @@ jobs:
           path: site
       - id: deployment
         uses: actions/deploy-pages@v5
+      - name: Verify the published newsletter assets
+        run: npm run verify:published
       - name: Create ActiveCampaign draft and email test
         env:
           ACTIVE_CAMPAIGN_URL: ${{ secrets.ACTIVE_CAMPAIGN_URL }}
