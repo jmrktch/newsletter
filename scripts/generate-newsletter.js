@@ -16,6 +16,7 @@ const esc = (v) => String(v ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").re
 const urlFor = (relative) => SOURCE_DIR ? pathToFileURL(path.join(SOURCE_DIR, relative)).toString() : `${SOURCE_URL}/${relative}`;
 const assetPath = (relative) => path.join(OUTPUT, "assets", relative);
 const assetUrl = (relative) => `${PUBLIC_BASE}/assets/${relative.replace(/\\/g,"/")}`;
+const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 function sydneyDate(value) {
   const parts = new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit" })
@@ -63,6 +64,23 @@ function normaliseArchives(manifest) {
   return { heatmaps, sparklineBuckets, nextBucket };
 }
 
+async function fetchArchivedAsset(file) {
+  let lastError = "unknown error";
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    try {
+      const response = await fetch(`${PUBLIC_BASE}/${file}?restore=${Date.now()}-${attempt}`, { cache: "no-store" });
+      if (response.ok) return response;
+      lastError = `HTTP ${response.status}`;
+      // Missing files are permanent; 5xx and rate-limit responses are not.
+      if (response.status < 500 && response.status !== 429 && response.status !== 408) break;
+    } catch (error) {
+      lastError = error.message;
+    }
+    if (attempt < 4) await sleep(1000 * 2 ** (attempt - 1));
+  }
+  throw new Error(`Could not restore ${file}: ${lastError} after 4 attempts`);
+}
+
 async function restoreArchives() {
   if (process.env.NEWSLETTER_SKIP_ARCHIVE_RESTORE === "1") return { heatmaps: [], sparklineBuckets: {}, nextBucket: 0 };
   const response = await fetch(`${PUBLIC_BASE}/manifest.json?archive=${Date.now()}`, { cache: "no-store" });
@@ -78,8 +96,7 @@ async function restoreArchives() {
   await Promise.all(Array.from({ length: Math.min(8, files.length) }, async () => {
     while (next < files.length) {
       const file = files[next++];
-      const asset = await fetch(`${PUBLIC_BASE}/${file}`);
-      if (!asset.ok) throw new Error(`Could not restore ${file}: HTTP ${asset.status}`);
+      const asset = await fetchArchivedAsset(file);
       const target = path.join(OUTPUT, file);
       fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.writeFileSync(target, Buffer.from(await asset.arrayBuffer()));
