@@ -17,6 +17,60 @@ const urlFor = (relative) => SOURCE_DIR ? pathToFileURL(path.join(SOURCE_DIR, re
 const assetPath = (relative) => path.join(OUTPUT, "assets", relative);
 const assetUrl = (relative) => `${PUBLIC_BASE}/assets/${relative.replace(/\\/g,"/")}`;
 
+function sydneyDate(value) {
+  const parts = new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit" })
+    .formatToParts(new Date(value));
+  const part = (name) => parts.find((item) => item.type === name)?.value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+async function snapshotGeneratedAt() {
+  const sourceManifest = SOURCE_DIR ? path.resolve(SOURCE_DIR, "..", "..", "snapshot", "latest", "manifest.json") : null;
+  try {
+    if (sourceManifest && fs.existsSync(sourceManifest)) return JSON.parse(fs.readFileSync(sourceManifest, "utf8")).generatedAt;
+    return (await (await fetch("https://jmrktch.github.io/widgets/snapshot/latest/manifest.json")).json()).generatedAt;
+  } catch {
+    return null;
+  }
+}
+
+function normaliseArchives(manifest) {
+  const archive = manifest?.archives || {};
+  const heatmaps = Array.isArray(archive.heatmaps) ? archive.heatmaps
+    .filter((item) => /^assets\/heatmaps\/\d{4}-\d{2}-\d{2}\.png$/.test(item?.file || "")) : [];
+  const sparklineBuckets = Object.fromEntries(Object.entries(archive.sparklineBuckets || {})
+    .filter(([slot, files]) => /^[0-6]$/.test(slot) && Array.isArray(files))
+    .map(([slot, files]) => [slot, files.filter((file) => /^assets\/sparklines\/buckets\/[0-6]\/.+\.png$/.test(file))]));
+  const nextBucket = Number.isInteger(archive.nextBucket) && archive.nextBucket >= 0 && archive.nextBucket < 7 ? archive.nextBucket : 0;
+  return { heatmaps, sparklineBuckets, nextBucket };
+}
+
+async function restoreArchives() {
+  if (process.env.NEWSLETTER_SKIP_ARCHIVE_RESTORE === "1") return { heatmaps: [], sparklineBuckets: {}, nextBucket: 0 };
+  const response = await fetch(`${PUBLIC_BASE}/manifest.json?archive=${Date.now()}`, { cache: "no-store" });
+  // A missing manifest is acceptable only for a truly first deployment.
+  if (response.status === 404) return { heatmaps: [], sparklineBuckets: {}, nextBucket: 0 };
+  if (!response.ok) throw new Error(`Could not restore prior image archive: HTTP ${response.status}`);
+  const archives = normaliseArchives(await response.json());
+  const files = [...new Set([
+    ...archives.heatmaps.map((item) => item.file),
+    ...Object.values(archives.sparklineBuckets).flat()
+  ])];
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(8, files.length) }, async () => {
+    while (next < files.length) {
+      const file = files[next++];
+      const asset = await fetch(`${PUBLIC_BASE}/${file}`);
+      if (!asset.ok) throw new Error(`Could not restore ${file}: HTTP ${asset.status}`);
+      const target = path.join(OUTPUT, file);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, Buffer.from(await asset.arrayBuffer()));
+    }
+  }));
+  console.log(`[newsletter] restored ${files.length} archived image${files.length === 1 ? "" : "s"}.`);
+  return archives;
+}
+
 function button(label, href, width = 210) {
   return `<div style="margin:10px 0 0;text-align:center"><table role="presentation" align="center" border="0" cellpadding="0" cellspacing="0"><tr><td align="center" valign="middle"><!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${href}" style="height:38px;v-text-anchor:middle;width:${width}px;" arcsize="11%" strokecolor="#FF745F" fillcolor="#FF745F"><w:anchorlock/><center style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;">${esc(label)}</center></v:roundrect><![endif]--><!--[if !mso]><!--><a href="${href}" target="_blank" rel="noopener noreferrer" style="background-color:#FF745F;border:1px solid #FF745F;border-radius:4px;color:#ffffff;display:inline-block;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;line-height:18px;padding:9px 21px;text-align:center;text-decoration:none;-webkit-text-size-adjust:none">${esc(label)}</a><!--<![endif]--></td></tr></table></div>`;
 }
@@ -84,9 +138,11 @@ async function readPanel(page, relative, mode = "", manifest = null) {
       const spark = sparks.nth(0);
       const symbol = await spark.evaluate((node) => node.closest("tr")?.querySelector("td")?.textContent?.trim() || "");
       if (!/^[A-Z0-9]{1,12}$/.test(symbol)) throw new Error("Invalid dividend sparkline symbol.");
-      const assetRelative = `sparklines/dividends/${symbol}.png`;
+      const assetRelative = `sparklines/buckets/${manifest.sparklineBucket}/dividends/${symbol}.png`;
       const size = await capture(page, spark, assetPath(assetRelative));
       manifest?.assets.push({ kind: "dividend-sparkline", symbol, file: `assets/${assetRelative}`, ...size });
+      fs.mkdirSync(path.dirname(assetPath(`sparklines/dividends/${symbol}.png`)), { recursive: true });
+      fs.copyFileSync(assetPath(assetRelative), assetPath(`sparklines/dividends/${symbol}.png`));
       await spark.evaluate((node, src) => {
         const image = document.createElement("img");
         image.src = src;
@@ -148,11 +204,18 @@ async function readPanel(page, relative, mode = "", manifest = null) {
 }
 
 async function main() {
+  const snapshotTime = await snapshotGeneratedAt();
+  const archiveDate = sydneyDate(new Date());
   fs.rmSync(OUTPUT, { recursive: true, force: true });
+  const archives = await restoreArchives();
+  const bucket = archives.nextBucket;
+  // The circular bucket is replaced only after six later newsletter runs, so
+  // every sent email retains its sparklines for the next seven editions.
+  fs.rmSync(assetPath(`sparklines/buckets/${bucket}`), { recursive: true, force: true });
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1200, height: 1200 }, deviceScaleFactor: 2 });
   const page = await context.newPage();
-  const manifest = { generatedAt: new Date().toISOString(), source: SOURCE_URL, assets: [] };
+  const manifest = { generatedAt: new Date().toISOString(), source: SOURCE_URL, sparklineBucket: bucket, assets: [] };
   try {
     await page.goto(urlFor("heatmap.html"), { waitUntil: "load" });
     const heatmap = page.locator(".snapshot-heatmap-tiles");
@@ -163,8 +226,12 @@ async function main() {
       const lines = box ? [...box.querySelectorAll(":scope > div")] : [];
       return { label: lines[0]?.textContent?.trim() || "", values: lines[1]?.textContent?.trim() || "", color: lines[1] ? getComputedStyle(lines[1]).color : "" };
     });
-    const heatmapFile = assetPath("heatmap.png"), heatmapSize = await capture(page, heatmap, heatmapFile);
-    manifest.assets.push({ kind: "heatmap", file: "assets/heatmap.png", ...heatmapSize });
+    const heatmapRelative = `heatmaps/${archiveDate}.png`;
+    const heatmapFile = assetPath(heatmapRelative), heatmapSize = await capture(page, heatmap, heatmapFile);
+    // Preserve the former latest URL for existing emails; new emails use the
+    // dated image above and therefore never have their heatmap replaced.
+    fs.copyFileSync(heatmapFile, assetPath("heatmap.png"));
+    manifest.assets.push({ kind: "heatmap", file: `assets/${heatmapRelative}`, ...heatmapSize });
     const sections = [];
     for (const scan of SCANS) {
       await page.goto(urlFor(`scans/${scan}.html`), { waitUntil: "load" });
@@ -176,9 +243,11 @@ async function main() {
         const spark = sparks.nth(0);
         const identity = await spark.evaluate((node) => ({ scan: node.dataset.scan, symbol: node.dataset.symbol }));
         if (identity.scan !== scan || !/^[A-Z0-9]{1,12}$/.test(identity.symbol || "")) throw new Error(`Invalid sparkline identity in ${scan}.`);
-        const relative = `sparklines/${scan}/${identity.symbol}.png`;
+        const relative = `sparklines/buckets/${bucket}/${scan}/${identity.symbol}.png`;
         const size = await capture(page, spark, assetPath(relative));
         manifest.assets.push({ kind: "sparkline", scan, symbol: identity.symbol, file: `assets/${relative}`, ...size });
+        fs.mkdirSync(path.dirname(assetPath(`sparklines/${scan}/${identity.symbol}.png`)), { recursive: true });
+        fs.copyFileSync(assetPath(relative), assetPath(`sparklines/${scan}/${identity.symbol}.png`));
         await spark.evaluate((node, src) => { const img=document.createElement("img"); img.src=src; img.alt="Daily sparkline"; img.width=92; img.height=30; img.style.cssText="display:block;border:0;width:92px;height:30px"; node.replaceWith(img); }, assetUrl(relative));
       }
       const section = await page.evaluate(() => {
@@ -218,12 +287,6 @@ async function main() {
     const media = await readPanel(page, "media.html", "media", manifest);
     const raises = await readPanel(page, "raises.html", "compact", manifest);
     const dividends = await readPanel(page, "dividends.html", "compact", manifest);
-    const sourceManifest = SOURCE_DIR ? path.resolve(SOURCE_DIR, "..", "..", "snapshot", "latest", "manifest.json") : null;
-    let snapshotTime = null;
-    try {
-      if (sourceManifest && fs.existsSync(sourceManifest)) snapshotTime = JSON.parse(fs.readFileSync(sourceManifest, "utf8")).generatedAt;
-      else snapshotTime = (await (await fetch("https://jmrktch.github.io/widgets/snapshot/latest/manifest.json")).json()).generatedAt;
-    } catch { /* The email remains usable if the optional summary cannot load. */ }
     const timestamp = formatSnapshotTime(snapshotTime);
     const scanById = new Map(sections.map((section) => [section.scan, section]));
     const orderedPanels = [
@@ -245,7 +308,7 @@ async function main() {
       return `<tr><td class="pad" style="padding:10px 28px 14px;background:#ffffff" bgcolor="#ffffff"><h3 style="margin:0 0 7px;color:#111b24;font-size:14px;line-height:20px;font-weight:700">${esc(panel.title)}</h3>${panel.subtitle ? `<p style="margin:0 0 7px;color:#667481;font-size:13px;line-height:18px">${esc(panel.subtitle)}</p>` : ""}${panel.table}${sourceLink}${orangeCta}</td></tr>`;
     }).join("");
     const heatmapHref = `${FOCUS}?uf_action=heatmap`;
-    const html = `<!DOCTYPE html><html lang="en" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>The Daily Focus</title><style>body{margin:0;color:#17212b;font-family:Arial,Helvetica,sans-serif}table{border-collapse:collapse}@media screen and (max-width:800px){.container{width:100%!important}.pad{padding-left:16px!important;padding-right:16px!important}}</style></head><body bgcolor="#ffffff"><center style="width:100%;background:#ffffff"><table role="presentation" class="container" width="760" align="center" border="0" cellpadding="0" cellspacing="0" style="width:760px;max-width:760px;background:#ffffff;border:0;margin:0 auto"><tr><td class="pad" align="center" style="padding:20px 28px 5px;background:#ffffff;text-align:center"><img class="header-image" width="704" src="${HEADER_IMAGE}" alt="Your Daily Market Snapshot" style="display:block;border:0;width:704px;max-width:704px;height:auto;margin:0 auto"></td></tr><tr><td class="pad" style="padding:0 28px 20px;background:#ffffff;color:#17212b;font-size:11px;line-height:16px;text-align:left"><b>Forwarded this email?</b> <a href="https://focus.marketech.com.au/#/register?redirect=%2F" target="_blank" rel="noopener noreferrer" style="color:#0000EE;text-decoration:underline">Sign up here to receive it daily</a>.</td></tr><tr><td class="pad" align="center" style="padding:0 28px 10px;background:#ffffff;text-align:center"><div style="margin:0;color:#17212b;font-size:13px;line-height:24px;text-align:center">A daily Focus market snapshot—log in or upgrade for live data and full scans</div><div style="font-size:14px;line-height:17px;font-weight:400;padding-bottom:3px"><b><u>${esc(timestamp)}</u></b></div></td></tr><tr><td class="pad" style="padding:0 28px 18px;background:#ffffff"><h3 style="margin:0 0 7px;color:#111b24;font-size:14px;line-height:20px;font-weight:700">ASX Top 200 Heatmap</h3><a href="${heatmapHref}" target="_blank" rel="noopener noreferrer"><img src="${assetUrl("heatmap.png")}" width="704" alt="ASX Top 200 Heatmap" style="display:block;border:0;width:100%;max-width:704px;height:auto;margin:0 auto"></a><p style="margin:7px 0 0;text-align:left"><a href="${heatmapHref}" target="_blank" rel="noopener noreferrer" style="color:#0000EE;font-size:12px;line-height:17px;font-weight:400;font-style:italic;text-decoration:underline">+ live heatmap, filters, &amp; charts in Focus</a></p>${button("Explore Today's ASX Heatmap", heatmapHref, 217)}</td></tr>${body}<tr><td class="pad" style="padding:22px 28px 8px;text-align:center;background:#ffffff">${button("Explore Marketech Focus", FOCUS, 190)}</td></tr><tr><td class="pad" style="padding:18px 26px;color:#7d8893;font-size:11px;line-height:17px;text-align:center;background:#ffffff">Content generated at ${esc(timestamp)} by Marketech Online Trading Pty Ltd (ACN 654 674 432), Authorised Representative (1293528) of Sanlam Private Wealth Pty Ltd (AFSL 337927). This content includes third-party information and/or analysis generated using mathematical models. The content has been prepared for general information purposes only and does not consider your objectives, financial situation, or needs. Before making any investment decisions, consider its appropriateness and seek professional advice where needed. Model outputs have limitations and do not guarantee future results. Investing involves risk, including loss of capital. Past performance is not a reliable indicator of future performance. Refer to our <a href="https://marketech.com.au/terms-and-conditions/" target="_blank" rel="noopener noreferrer" style="color:#0000EE;text-decoration:underline">Terms and Conditions</a> for more information. <strong>Data provided by TMX Australia Exchange.</strong></td></tr></table></center></body></html>`;
+    const html = `<!DOCTYPE html><html lang="en" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>The Daily Focus</title><style>body{margin:0;color:#17212b;font-family:Arial,Helvetica,sans-serif}table{border-collapse:collapse}@media screen and (max-width:800px){.container{width:100%!important}.pad{padding-left:16px!important;padding-right:16px!important}}</style></head><body bgcolor="#ffffff"><center style="width:100%;background:#ffffff"><table role="presentation" class="container" width="760" align="center" border="0" cellpadding="0" cellspacing="0" style="width:760px;max-width:760px;background:#ffffff;border:0;margin:0 auto"><tr><td class="pad" align="center" style="padding:20px 28px 5px;background:#ffffff;text-align:center"><img class="header-image" width="704" src="${HEADER_IMAGE}" alt="Your Daily Market Snapshot" style="display:block;border:0;width:704px;max-width:704px;height:auto;margin:0 auto"></td></tr><tr><td class="pad" style="padding:0 28px 20px;background:#ffffff;color:#17212b;font-size:11px;line-height:16px;text-align:left"><b>Forwarded this email?</b> <a href="https://focus.marketech.com.au/#/register?redirect=%2F" target="_blank" rel="noopener noreferrer" style="color:#0000EE;text-decoration:underline">Sign up here to receive it daily</a>.</td></tr><tr><td class="pad" align="center" style="padding:0 28px 10px;background:#ffffff;text-align:center"><div style="margin:0;color:#17212b;font-size:13px;line-height:24px;text-align:center">A daily Focus market snapshot—log in or upgrade for live data and full scans</div><div style="font-size:14px;line-height:17px;font-weight:400;padding-bottom:3px"><b><u>${esc(timestamp)}</u></b></div></td></tr><tr><td class="pad" style="padding:0 28px 18px;background:#ffffff"><h3 style="margin:0 0 7px;color:#111b24;font-size:14px;line-height:20px;font-weight:700">ASX Top 200 Heatmap</h3><a href="${heatmapHref}" target="_blank" rel="noopener noreferrer"><img src="${assetUrl(heatmapRelative)}" width="704" alt="ASX Top 200 Heatmap" style="display:block;border:0;width:100%;max-width:704px;height:auto;margin:0 auto"></a><p style="margin:7px 0 0;text-align:left"><a href="${heatmapHref}" target="_blank" rel="noopener noreferrer" style="color:#0000EE;font-size:12px;line-height:17px;font-weight:400;font-style:italic;text-decoration:underline">+ live heatmap, filters, &amp; charts in Focus</a></p>${button("Explore Today's ASX Heatmap", heatmapHref, 217)}</td></tr>${body}<tr><td class="pad" style="padding:22px 28px 8px;text-align:center;background:#ffffff">${button("Explore Marketech Focus", FOCUS, 190)}</td></tr><tr><td class="pad" style="padding:18px 26px;color:#7d8893;font-size:11px;line-height:17px;text-align:center;background:#ffffff">Content generated at ${esc(timestamp)} by Marketech Online Trading Pty Ltd (ACN 654 674 432), Authorised Representative (1293528) of Sanlam Private Wealth Pty Ltd (AFSL 337927). This content includes third-party information and/or analysis generated using mathematical models. The content has been prepared for general information purposes only and does not consider your objectives, financial situation, or needs. Before making any investment decisions, consider its appropriateness and seek professional advice where needed. Model outputs have limitations and do not guarantee future results. Investing involves risk, including loss of capital. Past performance is not a reliable indicator of future performance. Refer to our <a href="https://marketech.com.au/terms-and-conditions/" target="_blank" rel="noopener noreferrer" style="color:#0000EE;text-decoration:underline">Terms and Conditions</a> for more information. <strong>Data provided by TMX Australia Exchange.</strong></td></tr></table></center></body></html>`;
     const indexColour = heatmapIndex.values.includes("▼") ? "#c23a31" : heatmapIndex.values.includes("▲") ? "#137a4b" : "#677684";
     const heatmapTitle = heatmapIndex.label ? `<div style="margin:0 0 7px;text-align:center"><div style="display:inline-block;margin:0 0 3px;padding:2px 6px;color:#17212b;font-size:14px;line-height:20px;font-weight:700;border:1px solid #111111;border-radius:4px">${esc(heatmapIndex.label)}</div><div style="color:${indexColour};font-size:12px;line-height:17px;font-weight:400">${esc(heatmapIndex.values)}</div></div><h3 style="margin:0 0 7px;color:#111b24;font-size:14px;line-height:20px;font-weight:700">Australian Top 200 Heatmap</h3>` : "<h3 style=\"margin:0 0 7px;color:#111b24;font-size:14px;line-height:20px;font-weight:700\">Australian Top 200 Heatmap</h3>";
     let finalHtml = html.replace("<h3 style=\"margin:0 0 7px;color:#111b24;font-size:14px;line-height:20px;font-weight:700\">ASX Top 200 Heatmap</h3>", heatmapTitle);
@@ -257,9 +320,18 @@ async function main() {
     finalHtml = finalHtml.replace(disclaimerMarker, `${reorderedUsualEmailFooter()}${disclaimerMarker}`);
     const emailBytes = Buffer.byteLength(finalHtml, "utf8");
     if (emailBytes > 100000) throw new Error(`Email HTML is ${emailBytes.toLocaleString()} bytes; it must remain below 100 KB.`);
+    const heatmapArchive = [
+      ...archives.heatmaps.filter((item) => item.date !== archiveDate),
+      { date: archiveDate, file: `assets/${heatmapRelative}` }
+    ].sort((a, b) => a.date.localeCompare(b.date));
+    const bucketAssets = manifest.assets
+      .filter((asset) => asset.kind === "sparkline" || asset.kind === "dividend-sparkline")
+      .map((asset) => asset.file);
+    const sparklineBuckets = { ...archives.sparklineBuckets, [bucket]: bucketAssets };
+    const nextBucket = (bucket + 1) % 7;
     fs.writeFileSync(path.join(OUTPUT, "index.html"), finalHtml);
-    fs.writeFileSync(path.join(OUTPUT, "manifest.json"), JSON.stringify({ ...manifest, sourceGeneratedAt: snapshotTime, emailBytes, scans: sections.map(({scan,count})=>({scan,sparklines:count})) }, null, 2)+"\n");
-    console.log(JSON.stringify({ ok:true, output:"site/newsletter/latest", heatmap:heatmapSize, sparklines:manifest.assets.filter(a=>a.kind==="sparkline").length, emailBytes },null,2));
+    fs.writeFileSync(path.join(OUTPUT, "manifest.json"), JSON.stringify({ ...manifest, sourceGeneratedAt: snapshotTime, emailBytes, archives: { heatmaps: heatmapArchive, sparklineBuckets, nextBucket }, scans: sections.map(({scan,count})=>({scan,sparklines:count})) }, null, 2)+"\n");
+    console.log(JSON.stringify({ ok:true, output:"site/newsletter/latest", heatmap:heatmapSize, sparklines:manifest.assets.filter(a=>a.kind==="sparkline").length, sparklineBucket: bucket, archivedHeatmaps: heatmapArchive.length, emailBytes },null,2));
   } finally { await context.close(); await browser.close(); }
 }
 main().catch((e)=>{ console.error(e.stack||e); process.exitCode=1; });
