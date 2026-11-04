@@ -14,7 +14,6 @@ jobs:
     timeout-minutes: 15
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -31,8 +30,21 @@ jobs:
       - uses: actions/upload-pages-artifact@v5
         with:
           path: site
-      - id: deployment
+      - id: deployment-primary
         uses: actions/deploy-pages@v5
+        continue-on-error: true
+        with:
+          timeout: 120000
+      - id: deployment-retry
+        if: steps.deployment-primary.outcome == 'failure'
+        uses: actions/deploy-pages@v5
+        with:
+          timeout: 180000
+      - name: Fail if GitHub Pages could not deploy
+        if: steps.deployment-primary.outcome == 'failure' && steps.deployment-retry.outcome == 'failure'
+        run: |
+          echo "GitHub Pages did not complete its initial 2-minute deployment or the 3-minute retry."
+          exit 1
       - name: Verify the published newsletter assets
         run: npm run verify:published
       - name: Create ActiveCampaign draft and email test
