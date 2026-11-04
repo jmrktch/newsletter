@@ -42,6 +42,16 @@ async function snapshotGeneratedAt() {
   }
 }
 
+function requireFreshSnapshot(snapshotTime) {
+  const generatedAt = Date.parse(snapshotTime || "");
+  if (!Number.isFinite(generatedAt)) throw new Error("Source snapshot has no valid generatedAt timestamp.");
+  const ageMs = Date.now() - generatedAt;
+  const maximumAgeMs = 60 * 60 * 1000;
+  if (ageMs > maximumAgeMs) {
+    throw new Error(`Source snapshot is ${Math.floor(ageMs / 60000)} minutes old (generated ${new Date(generatedAt).toISOString()}); maximum age is 60 minutes.`);
+  }
+}
+
 function normaliseArchives(manifest) {
   const archive = manifest?.archives || {};
   const heatmaps = Array.isArray(archive.heatmaps) ? archive.heatmaps
@@ -214,6 +224,7 @@ async function readPanel(page, relative, mode = "", manifest = null) {
 async function main() {
   const runStartedAt = new Date();
   const snapshotTime = await snapshotGeneratedAt();
+  requireFreshSnapshot(snapshotTime);
   const archiveDate = sydneyDate(runStartedAt);
   const archiveKey = sydneyAssetKey(runStartedAt);
   fs.rmSync(OUTPUT, { recursive: true, force: true });
