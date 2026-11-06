@@ -11,7 +11,7 @@ const EMAIL_FILE = path.join(ROOT, "site", "newsletter", "latest", "index.html")
 const LIST_ID = 42; // The Daily Focus List
 const ADDRESS_ID = 2;
 const SUBJECT = "The Daily Focus";
-const TEST_RECIPIENTS = ["jwilson@marketech.com.au", "TClark@marketech.com.au", "chill@marketech.com.au"];
+const TEST_RECIPIENTS = ["jwilson@marketech.com.au"];
 const SENDER = {
   fromname: "Marketech Support",
   fromemail: "support@marketech.com.au",
