@@ -9,11 +9,9 @@ permissions:
   pages: write
   id-token: write
 jobs:
-  build-and-publish:
+  build:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    environment:
-      name: github-pages
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -30,6 +28,34 @@ jobs:
       - uses: actions/upload-pages-artifact@v5
         with:
           path: site
+      - name: Upload newsletter verification and email files
+        uses: actions/upload-artifact@v6
+        with:
+          name: newsletter-build-${{ github.run_attempt }}
+          path: |
+            site/newsletter/latest/index.html
+            site/newsletter/latest/manifest.json
+          if-no-files-found: error
+          retention-days: 1
+    outputs:
+      newsletter-artifact: newsletter-build-${{ github.run_attempt }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Restore newsletter verification and email files
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ needs.build.outputs.newsletter-artifact }}
+          path: site/newsletter/latest
       - id: deployment-primary
         uses: actions/deploy-pages@v5
         continue-on-error: true
